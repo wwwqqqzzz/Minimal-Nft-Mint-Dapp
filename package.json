@@ -9,6 +9,7 @@
     "deploy:sepolia": "npx hardhat run scripts/deploy.js --network sepolia",
     "copy-abi": "node scripts/copy-abi.js",
     "start:frontend": "cd frontend && npm start",
+    "build:frontend": "cd frontend && npm run build",
     "upload": "node scripts/upload.js",
     "verify:mumbai": "npx hardhat verify --network mumbai",
     "verify:sepolia": "npx hardhat verify --network sepolia"
