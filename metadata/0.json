@@ -1,0 +1,25 @@
+{
+  "name": "Classic Blue NFT",
+  "description": "A classic blue-themed NFT representing the origin of our collection.",
+  "image": "./assets/1.png",
+  "attributes": [
+    {
+      "trait_type": "Color Theme",
+      "value": "Blue"
+    },
+    {
+      "trait_type": "Style",
+      "value": "Classic"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Common"
+    }
+  ],
+  "properties": {
+    "templateId": 0,
+    "originalFilename": "1.png",
+    "rarity": "Common",
+    "maxSupply": 50
+  }
+}

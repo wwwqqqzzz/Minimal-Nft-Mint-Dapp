@@ -2,12 +2,13 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 
-contract MyNFT is ERC721, Ownable, IERC2981 {
+contract MyNFT is ERC721, ERC721Enumerable, Ownable, IERC2981 {
     using Counters for Counters.Counter;
     
     Counters.Counter private _tokenIdCounter;
@@ -147,7 +148,7 @@ contract MyNFT is ERC721, Ownable, IERC2981 {
         baseTokenURI = uri;
     }
 
-    function totalSupply() public view returns (uint256) {
+    function totalSupply() public view override returns (uint256) {
         return _tokenIdCounter.current();
     }
 
@@ -155,10 +156,20 @@ contract MyNFT is ERC721, Ownable, IERC2981 {
     function supportsInterface(bytes4 interfaceId) 
         public 
         view 
-        override(ERC721, IERC165) 
+        override(ERC721, ERC721Enumerable, IERC165) 
         returns (bool) 
     {
         return interfaceId == type(IERC2981).interfaceId || super.supportsInterface(interfaceId);
+    }
+
+    // ERC721Enumerable 所需 override 方法（OpenZeppelin v4.9 风格）
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 firstTokenId,
+        uint256 batchSize
+    ) internal override(ERC721, ERC721Enumerable) {
+        super._beforeTokenTransfer(from, to, firstTokenId, batchSize);
     }
 
     // ======== 查询功能 ========

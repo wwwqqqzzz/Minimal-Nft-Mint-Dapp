@@ -81,6 +81,8 @@ nft-mint-starter/
    └─ src/
       ├─ index.js
       ├─ App.js
+      ├─ MyNFT.json          # ABI（兼容路径）
+      ├─ abi/MyNFT.json      # ABI（推荐路径）
       └─ utils/ipfs.js
 ```
 
@@ -818,3 +820,89 @@ MIT License - 你可以自由使用、修改和分发这个代码。
 ---
 
 **⚠️ 免责声明**: 这是一个教学用途的模板，在生产环境使用前请进行充分的安全审计和测试。
+
+## 前端 UI 功能与最近改动概览
+
+- 钱包与网络
+  - 一键连接 MetaMask，实时检测并提示网络是否正确（Sepolia/Mumbai 等）。
+  - 提供网络切换能力，避免因链不匹配导致读写失败。
+- Gas 估算与设置
+  - 支持预估铸造所需 Gas（gasEstimate），并按档位选择（selectedGasLevel）。
+- NFT 预览
+  - 铸造前显示预览（nftPreview），便于确认。
+- 我的 NFT 列表（可折叠展示）
+  - 点击“显示/隐藏”切换（showNFTList）。
+  - 分页展示（nftsPerPage, currentPage），支持加载状态与空态提示。
+  - 使用 Skeleton 骨架屏（components/SkeletonCard.jsx）优化加载体验。
+  - 为图片提供占位图（public/og-image.svg），避免因 IPFS 访问不稳出现空白。
+- 兜底加载策略（健壮性）
+  - 在常规通过 tokenURI 加载失败时，采用 ownerOf 枚举做兜底（fallbackLoadByOwnerOf），尽可能把用户已拥有的 NFT 展示出来。
+- 错误与状态提示
+  - 完整的错误捕获与操作状态展示，帮助快速定位问题。
+
+提示：如遇 ESLint 关于 useEffect 依赖的警告，请根据实际依赖补充；确保被调用的方法均已在文件内定义或正确导入（详见 doc/troubleshooting/common-issues.md 的“前端编译报错：未定义的函数”）。
+
+## Windows 启动提示（PowerShell）
+
+- 在 frontend 目录内启动（推荐）
+```powershell
+cd frontend
+npm start
+```
+
+- 指定前端目录启动（适用于从项目根目录执行）
+```powershell
+npm --prefix "E:\\xiangmu\\Minimal Nft Mint Dapp\\frontend" start
+```
+
+- 固定端口（例如 3001）
+```powershell
+$env:PORT=3001; npm start
+```
+
+- 端口占用时，Create React App 会提示并自动换一个空闲端口，请查看终端输出的实际访问地址。
+
+更多运行/排障细节，见 doc/troubleshooting/common-issues.md。
+
+## 可选模板（SelectableNFT）模式
+
+- 功能概述：一次部署合约，在链上维护多套模板，用户在前端选择其一后进行铸造。适合多风格/多主题的合集共用同一合约。
+- 关联组件：
+  - 合约：contracts/SelectableNFT.sol
+  - 前端：frontend/src/SelectableApp.js
+  - 脚本：
+    - scripts/enable-http-templates.js（基于 HTTP/本地元数据启用模板）
+    - scripts/disable-all-templates.js（禁用全部模板）
+    - scripts/setup-selectable-templates.js（批量初始化模板）
+    - scripts/upload-selectable-nfts.js（把模板元数据批量上传到 IPFS）
+    - scripts/copy-selectable-abi.js（把 SelectableNFT 的 ABI 拷贝到前端）
+
+### 快速开始（Sepolia 测试网）
+1) 部署合约
+```bash
+npx hardhat run scripts/deploy-selectable-nft.js --network sepolia
+```
+2) 同步 ABI 到前端
+```bash
+node scripts/copy-selectable-abi.js
+```
+3) 启动前端（Windows PowerShell 示例）
+```powershell
+$env:PORT=3003; npm --prefix ./frontend start
+```
+> 提示：若 3000 端口被占用，开发服务器会询问是否使用其他端口，请以终端输出的实际地址为准。
+
+4) 仅启用本地 HTTP 模板（可选）
+```bash
+node scripts/enable-http-templates.js
+```
+- 该脚本依赖 .env 中的 SEPOLIA_URL 与 PRIVATE_KEY。若遇到 429（速率限制），可暂时改用公共 RPC：`SEPOLIA_URL=https://rpc.sepolia.org`，或使用你自己的提供商 Key。
+
+### 展示策略（当前版本）
+- 前端在加载模板阶段加入了“显示层过滤”：为了演示与稳定性，默认仅展示本地 0.json、1.json、2.json、3.json 四个模板。
+- 若同一编号存在多个副本，会自动选择 templateId 最小的那一份。
+- 这是前端层的临时策略，不会改变链上数据；链上仍可存在更多模板。
+
+### 相关提示
+- 端口：如遇端口占用，按照 CRA 提示选择新的端口；常见为 3001、3002、3003 等。
+- RPC：公共 RPC 稳定性有限，脚本可能因限流失败；建议使用稳定的供应商（Infura/Alchemy/QuickNode 等）或自建节点。

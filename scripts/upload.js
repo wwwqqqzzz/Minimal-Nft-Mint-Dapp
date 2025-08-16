@@ -14,17 +14,35 @@ async function main() {
   const image = await fs.promises.readFile(imagePath);
 
   console.log('Uploading image and metadata to nft.storage...');
-  const metadata = await client.store({
-    name: 'My NFT #0',
-    description: 'A minimal example NFT',
-    image: new File([image], '1.png', { type: 'image/png' }),
-    properties: { example: true }
-  });
-
-  console.log('Stored metadata url:', metadata.url);
-  console.log('To use as baseURI for ERC721 constructor, use the CID root, e.g.');
-  console.log('  baseURI = "' + metadata.url.replace('ipfs://', 'ipfs://') + '/"');
-  console.log('\nNOTE: nft.storage 会保证内容被 pin，metadata.url 是类似 ipfs://bafy.../0');
+  
+  // 创建多个 metadata 文件
+  const metadataFiles = [];
+  for (let i = 0; i < 10; i++) {
+    const metadata = {
+      name: `My NFT #${i}`,
+      description: `A minimal example NFT - Token ${i}`,
+      image: new File([image], '1.png', { type: 'image/png' }),
+      properties: { 
+        example: true,
+        tokenId: i
+      }
+    };
+    
+    const metadataStr = JSON.stringify(metadata, null, 2);
+    metadataFiles.push(new File([metadataStr], `${i}.json`, { type: 'application/json' }));
+  }
+  
+  // 上传 metadata 文件夹
+  const folderCid = await client.storeDirectory(metadataFiles);
+  const baseURI = `ipfs://${folderCid}/`;
+  
+  console.log('Stored metadata folder CID:', folderCid);
+  console.log('Base URI for contract:', baseURI);
+  console.log('\nExample metadata URLs:');
+  console.log(`  Token 0: ${baseURI}0.json`);
+  console.log(`  Token 1: ${baseURI}1.json`);
+  console.log('\nTo use in contract deployment:');
+  console.log(`  BASE_URI="${baseURI}"`);
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

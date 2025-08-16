@@ -1,0 +1,25 @@
+{
+  "name": "Cosmic Night Mare",
+  "description": "A mysterious cosmic creature wandering through digital nightmares.",
+  "image": "./assets/cnm.jpg",
+  "attributes": [
+    {
+      "trait_type": "Color Theme",
+      "value": "Dark"
+    },
+    {
+      "trait_type": "Style",
+      "value": "Cosmic"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Rare"
+    }
+  ],
+  "properties": {
+    "templateId": 1,
+    "originalFilename": "cnm.jpg",
+    "rarity": "Rare",
+    "maxSupply": 20
+  }
+}

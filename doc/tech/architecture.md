@@ -113,4 +113,60 @@ const chainId = await window.ethereum.request({ method: 'eth_chainId' });
 
 ---
 
-最后更新：2024年12月
+## SelectableNFT（可选模板）架构与数据流
+
+本模式允许在同一合约下维护多套模板，前端在渲染时获取可用模板并让用户选择后进行铸造。
+
+### 组件与职责
+- 合约：contracts/SelectableNFT.sol
+  - 暴露模板查询接口（如 getAvailableTemplates、getTemplateInfo）
+  - 维护模板可用状态与 metadataURI（IPFS 或 HTTP）
+  - 提供带模板参数的铸造入口（如 mint 带 templateId 参数，具体以合约实现为准）
+- 前端：frontend/src/SelectableApp.js
+  - 初始化合约实例、加载模板、展示选择 UI
+  - 处理模板去重/过滤、发起铸造交易、更新状态
+- 元数据：metadata/0.json ~ 3.json（示例本地 HTTP 模板）
+- 脚本（scripts/）：
+  - enable-http-templates.js：启用本地 HTTP 模板
+  - disable-all-templates.js：禁用全部模板
+  - setup-selectable-templates.js：批量初始化模板
+  - upload-selectable-nfts.js：上传模板 metadata 到 IPFS
+  - copy-selectable-abi.js：同步 ABI 至前端
+
+### 数据流（加载与铸造）
+```
+Frontend(SelectableApp) ──> Contract.getAvailableTemplates() ──> [IDs]
+                           └─> For Each ID: getTemplateInfo(id) ──> metadataURI
+                           └─> fetch(metadataURI) ──> 模板详情
+                           └─> 显示层过滤/去重 ──> 渲染模板卡片
+用户选择模板 ──> 触发铸造（带模板参数） ──> 钱包签名 ──> 等待确认 ──> 列表/状态刷新
+```
+
+### 显示层过滤（当前版本策略）
+- 仅展示本地 0.json、1.json、2.json、3.json 四个模板；如同编号存在多份，选择 templateId 最小者。
+- 该策略只影响前端显示，不修改链上状态；链上可以存在更多模板。
+- 后续可将此策略做成可配置（如 REACT_APP_LIMIT_TEMPLATES）或 UI 开关。
+
+### 环境变量与运行
+- 根目录 `.env`：
+  - SEPOLIA_URL：建议使用稳定的 RPC；遇到限流可临时 `https://rpc.sepolia.org`
+  - PRIVATE_KEY：部署/脚本账户私钥（0x 开头）
+- 前端 `.env`：
+  - REACT_APP_CONTRACT_ADDRESS：合约地址
+  - （可选）REACT_APP_NETWORK、REACT_APP_LIMIT_TEMPLATES
+- 开发服务器（Windows PowerShell）：
+```powershell
+$env:PORT=3003; npm --prefix ./frontend start
+```
+
+### 异常与重试建议
+- RPC 限流/429：
+  - 切换公共 RPC 或更换供应商 Key；对脚本增加指数退避与重试
+- IPFS 拉取失败：
+  - 使用多网关降级（前端 utils/ipfs.js 已支持）
+- 端口占用：
+  - CRA 会提示并切换端口（如 3001/3002/3003），以终端地址为准
+
+---
+
+最后更新：2025年08月（新增 SelectableNFT 模式与显示层过滤策略）

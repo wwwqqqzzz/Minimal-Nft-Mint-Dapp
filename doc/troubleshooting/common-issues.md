@@ -31,7 +31,30 @@ if (chainId !== SEPOLIA_CHAIN_ID) {
 }
 ```
 
-## 2) MetaMask 没反应 / 弹了错
+## 2) 模板列表为什么只显示 4 个？
+- 当前版本为了演示与稳定性，在前端加入了“显示层过滤”逻辑：仅展示本地 0.json、1.json、2.json、3.json 四个模板。
+- 如果同一编号存在多个副本，自动选择 `templateId` 最小的那一份。
+- 该策略只影响前端显示，不会改变链上模板状态；后续可切换为读取链上真实可用模板。
+- 可配置化建议：
+  - 通过 `frontend/.env` 增加开关，如 `REACT_APP_LIMIT_TEMPLATES=true|false`。
+  - 或在 UI 中提供“仅显示本地4个”切换按钮，默认开启。
+
+## 3) 脚本报 Too Many Requests / 429
+- 现象：使用供应商 RPC（例如 Alchemy）时，批量脚本触发速率限制。
+- 解决：
+  1) 临时切换公共 RPC：`SEPOLIA_URL=https://rpc.sepolia.org`
+  2) 更换为自己的供应商 Key 或提升配额
+  3) 在脚本里增加重试与指数退避
+
+## 4) Windows 启动前端/端口占用问题
+- PowerShell 设置端口的正确语法：
+```powershell
+$env:PORT=3003; npm --prefix ./frontend start
+```
+- 如果 3000 被占用，CRA 会提示使用其他端口（如 3001/3002/3003），以终端显示 URL 为准。
+- 若你在根目录跑：`npm --prefix ./frontend start`；或先 `cd frontend` 再 `npm start`。
+
+## 5) MetaMask 没反应 / 弹了错
 - 先排查：网络、余额、合约地址、ABI
 - 实操：
 ```javascript
@@ -46,33 +69,7 @@ try {
 }
 ```
 
-## 3) 部署脚本跑不通
-- 常见：.env 错、私钥格式错、RPC 不稳、余额不够
-- 我会这样做：
-```bash
-# 看 .env
-cat .env
-# 打开 hardhat console 验证网络
-npx hardhat console --network sepolia
-# 在 console 里查余额
-# const bal = await ethers.provider.getBalance("YOUR_ADDRESS")
-# console.log(ethers.utils.formatEther(bal))
-```
-- 快速检查：
-  - [ ] PRIVATE_KEY 0x 开头
-  - [ ] SEPOLIA_URL 可访问
-  - [ ] 账户有测试 ETH
-  - [ ] BASE_URI 已设置
-
-## 4) 前端连不上 / 状态不更新
-- 先判断浏览器有没有钱包；再监听账户和网络变化
-```javascript
-if (!window.ethereum) { alert('请安装 MetaMask'); return }
-window.ethereum.on('accountsChanged', (accs) => setAccount(accs[0] || null))
-window.ethereum.on('chainChanged', () => window.location.reload())
-```
-
-## 5) IPFS 打不开 / 图片 404
+## 6) IPFS 打不开 / 图片 404
 - 多准备几个网关，降级处理
 ```javascript
 const IPFS_GATEWAYS = [
@@ -87,140 +84,6 @@ const ipfsToHttp = (ipfsUrl, i = 0) => {
 }
 ```
 
-## 6) 铸造后 UI 不刷新
-- 交易确认要时间，前端要等确认并主动刷新
-```javascript
-const mintNFT = async () => {
-  const tx = await contract.mint()
-  const receipt = await tx.wait()
-  await updateTotalSupply()
-  await updateUserBalance()
-}
-useEffect(() => {
-  const t = setInterval(() => {
-    if (account && contract) {
-      updateTotalSupply();
-      updateUserBalance();
-    }
-  }, 10000)
-  return () => clearInterval(t)
-}, [account, contract])
-```
-
-## 7) 切换网络后各种错
-- 重新初始化，清旧数据，再拉新数据
-```javascript
-window.ethereum.on('chainChanged', async (chainId) => {
-  await initializeContract()
-  setCurrentNetwork(chainId)
-  setTotalSupply(0)
-  setUserBalance(0)
-  if (account) await loadContractData()
-})
-```
-
-## 8) ABI 不同步导致前端挂
-- 现象：方法调用报错、编码不一致
-- 处理：重新跑一下复制脚本，确保 ABI 更新
-```bash
-npm run copy-abi
-```
-
-## 9) 跨网或多合约地址管理
-- 做个地址映射，按 chainId 读对应地址
-```javascript
-const ADDRS = {
-  '0xaa36a7': '0xYourSepoliaAddress',
-  '0x1': '0xYourMainnetAddress',
-}
-const addr = ADDRS[await window.ethereum.request({ method: 'eth_chainId' })]
-```
-
-——
-最后更新：2024年12月（更多见 README 与 deployment/）
-  https://sepolia.infura.io/v3/YOUR_KEY
-```
-
----
-
-## 📋 问题排查清单
-
-### 部署前检查
-- [ ] 环境变量配置完整
-- [ ] 依赖包安装完成
-- [ ] 账户余额充足
-- [ ] RPC节点可访问
-
-### 运行时检查
-- [ ] MetaMask已安装并解锁
-- [ ] 连接到正确网络
-- [ ] 合约地址配置正确
-- [ ] ABI文件已更新
-
-### 交易失败检查
-- [ ] Gas费设置合理
-- [ ] 账户余额充足
-- [ ] 合约函数参数正确
-- [ ] 网络状态稳定
-
----
-
-## 🆘 获取帮助
-
-### 官方资源
-- [Hardhat文档](https://hardhat.org/docs)
-- [ethers.js文档](https://docs.ethers.io/)
-- [OpenZeppelin文档](https://docs.openzeppelin.com/)
-- [MetaMask文档](https://docs.metamask.io/)
-
-### 社区支持
-- [Ethereum Stack Exchange](https://ethereum.stackexchange.com/)
-- [Hardhat Discord](https://discord.gg/hardhat)
-- [OpenZeppelin Forum](https://forum.openzeppelin.com/)
-
-### 错误码参考
-- `4001`: 用户拒绝请求
-- `4100`: 未授权的方法
-- `4200`: 不支持的方法
-- `4902`: 未识别的链ID
-- `-32000`: 交易被拒绝
-- `-32603`: 内部错误
-
----
-
-## 💡 开发经验总结
-
-### 最常见的3个问题
-1. **网络不匹配** - 占所有问题的60%
-2. **ABI文件未同步** - 占所有问题的20%
-3. **状态更新延迟** - 占所有问题的15%
-
-### 开发建议
-1. **始终先检查网络状态** - 大部分问题都与网络相关
-2. **使用自动化脚本** - 减少手动操作错误
-3. **添加详细的错误处理** - 帮助快速定位问题
-4. **保持文档更新** - 记录每个新遇到的问题
-
-### 调试技巧
-```javascript
-// 在App.js中添加调试信息
-console.log('=== 调试信息 ===');
-console.log('当前账户:', account);
-console.log('当前网络:', currentNetwork);
-console.log('合约地址:', CONTRACT_ADDRESS);
-console.log('合约实例:', contract);
-console.log('================');
-```
-
-### 快速排查清单
-- [ ] 检查MetaMask是否连接到正确网络
-- [ ] 确认合约地址配置正确
-- [ ] 验证ABI文件是最新版本
-- [ ] 检查账户余额是否充足
-- [ ] 查看浏览器控制台错误信息
-
----
-
-*最后更新：2024年12月*  
-*基于实际开发经验整理，如有新问题请及时更新此文档*  
-*问题反馈：请在项目Issues中提交*
+## 7) ABI 不同步导致前端挂
+- 重新跑复制脚本，确保 ABI 更新：`npm run copy-abi`
+- 重新跑复制脚本，确保 ABI 更新：`npm run copy-abi`

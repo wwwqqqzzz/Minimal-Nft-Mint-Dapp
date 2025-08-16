@@ -1,0 +1,25 @@
+{
+  "name": "Purple Power Swing",
+  "description": "An energetic purple wave bringing power and motion to the blockchain.",
+  "image": "/assets/pppsw.jpg",
+  "attributes": [
+    {
+      "trait_type": "Color Theme",
+      "value": "Purple"
+    },
+    {
+      "trait_type": "Style",
+      "value": "Dynamic"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Uncommon"
+    }
+  ],
+  "properties": {
+    "templateId": 2,
+    "originalFilename": "pppsw.jpg",
+    "rarity": "Uncommon",
+    "maxSupply": 30
+  }
+}

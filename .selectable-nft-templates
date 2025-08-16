@@ -1,0 +1,40 @@
+{
+  "folderCid": null,
+  "baseURI": "http://localhost:3000/metadata/",
+  "gatewayURL": "http://localhost:3000/metadata/",
+  "uploadMethod": "http-local-dev",
+  "templates": [
+    {
+      "templateId": 0,
+      "metadataURI": "http://localhost:3000/metadata/0.json",
+      "name": "Classic Blue NFT",
+      "filename": "1.png",
+      "rarity": "Common",
+      "maxSupply": 50
+    },
+    {
+      "templateId": 1,
+      "metadataURI": "http://localhost:3000/metadata/1.json",
+      "name": "Cosmic Night Mare",
+      "filename": "cnm.jpg",
+      "rarity": "Rare",
+      "maxSupply": 20
+    },
+    {
+      "templateId": 2,
+      "metadataURI": "http://localhost:3000/metadata/2.json",
+      "name": "Purple Power Swing",
+      "filename": "pppsw.jpg",
+      "rarity": "Uncommon",
+      "maxSupply": 30
+    },
+    {
+      "templateId": 3,
+      "metadataURI": "http://localhost:3000/metadata/3.json",
+      "name": "Zen Digital Token",
+      "filename": "zdt.jpg",
+      "rarity": "Epic",
+      "maxSupply": 10
+    }
+  ]
+}

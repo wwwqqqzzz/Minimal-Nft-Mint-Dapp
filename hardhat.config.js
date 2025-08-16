@@ -3,7 +3,15 @@ require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-verify");
 
 module.exports = {
-  solidity: "0.8.19",
+  solidity: {
+    version: "0.8.19",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200
+      }
+    }
+  },
   networks: {
     mumbai: {
       url: process.env.MUMBAI_URL || "",

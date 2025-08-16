@@ -1,0 +1,25 @@
+{
+  "name": "Zen Digital Token",
+  "description": "A serene digital token embodying zen philosophy and minimalism.",
+  "image": "./assets/zdt.jpg",
+  "attributes": [
+    {
+      "trait_type": "Color Theme",
+      "value": "Minimal"
+    },
+    {
+      "trait_type": "Style",
+      "value": "Zen"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Epic"
+    }
+  ],
+  "properties": {
+    "templateId": 3,
+    "originalFilename": "zdt.jpg",
+    "rarity": "Epic",
+    "maxSupply": 10
+  }
+}

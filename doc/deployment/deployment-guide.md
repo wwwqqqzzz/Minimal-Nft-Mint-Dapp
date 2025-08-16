@@ -89,6 +89,28 @@ npm run start:frontend
 ```
 打开 http://localhost:3000，连钱包，试着 Mint 一下。
 
+10) 部署到 Vercel（可选但推荐）
+```bash
+# 构建生产版本
+npm run build:frontend
+
+# 推送到 GitHub
+git add . && git commit -m "ready for production" && git push
+
+# 在 Vercel 上：
+# 1. 登录 vercel.com，选择 Import Git Repository
+# 2. 选择你的仓库，设置：
+#    - Framework Preset: Create React App
+#    - Root Directory: frontend
+#    - Build Command: npm run build
+#    - Install Command: npm install
+#    - Output Directory: build
+# 3. 环境变量：
+#    - REACT_APP_CONTRACT_ADDRESS=你的合约地址
+#    - REACT_APP_NETWORK=sepolia
+# 4. Deploy，1-2分钟后拿到在线网址
+```
+
 ## 我会检查的点（快速自测）
 - 合约：能在浏览器上看到、验证通过、函数可调
 - 前端：能连 MetaMask、地址显示正确、网络检测正常
