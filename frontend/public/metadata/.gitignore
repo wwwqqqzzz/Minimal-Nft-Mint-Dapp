@@ -1,0 +1,4 @@
+# Ignore all generated metadata in this folder
+*
+# But keep this file
+!.gitignore

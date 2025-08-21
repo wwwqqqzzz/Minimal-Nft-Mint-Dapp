@@ -1,0 +1,137 @@
+{
+  "abi": [
+    {
+      "inputs": [
+        {"name": "collection", "type": "address"},
+        {"name": "tokenId", "type": "uint256"},
+        {"name": "price", "type": "uint256"}
+      ],
+      "name": "listItem",
+      "outputs": [{"name": "", "type": "uint256"}],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {"name": "listingId", "type": "uint256"},
+        {"name": "newPrice", "type": "uint256"}
+      ],
+      "name": "updatePrice",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [{"name": "listingId", "type": "uint256"}],
+      "name": "cancelListing",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [{"name": "listingId", "type": "uint256"}],
+      "name": "buy",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {"name": "fromId", "type": "uint256"},
+        {"name": "toId", "type": "uint256"}
+      ],
+      "name": "getListingsInRange",
+      "outputs": [
+        {
+          "components": [
+            {"name": "collection", "type": "address"},
+            {"name": "tokenId", "type": "uint256"},
+            {"name": "seller", "type": "address"},
+            {"name": "price", "type": "uint256"},
+            {"name": "active", "type": "bool"}
+          ],
+          "name": "arr",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "listingCount",
+      "outputs": [{"name": "", "type": "uint256"}],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [{"name": "", "type": "uint256"}],
+      "name": "listings",
+      "outputs": [
+        {"name": "collection", "type": "address"},
+        {"name": "tokenId", "type": "uint256"},
+        {"name": "seller", "type": "address"},
+        {"name": "price", "type": "uint256"},
+        {"name": "active", "type": "bool"}
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "platformFeeBps",
+      "outputs": [{"name": "", "type": "uint96"}],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "feeRecipient",
+      "outputs": [{"name": "", "type": "address"}],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {"indexed": true, "name": "listingId", "type": "uint256"},
+        {"indexed": true, "name": "collection", "type": "address"},
+        {"indexed": true, "name": "tokenId", "type": "uint256"},
+        {"indexed": false, "name": "seller", "type": "address"},
+        {"indexed": false, "name": "price", "type": "uint256"}
+      ],
+      "name": "Listed",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {"indexed": true, "name": "listingId", "type": "uint256"},
+        {"indexed": false, "name": "oldPrice", "type": "uint256"},
+        {"indexed": false, "name": "newPrice", "type": "uint256"}
+      ],
+      "name": "PriceUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {"indexed": true, "name": "listingId", "type": "uint256"}
+      ],
+      "name": "Cancelled",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {"indexed": true, "name": "listingId", "type": "uint256"},
+        {"indexed": false, "name": "buyer", "type": "address"},
+        {"indexed": false, "name": "price", "type": "uint256"},
+        {"indexed": false, "name": "royalty", "type": "uint256"},
+        {"indexed": false, "name": "fee", "type": "uint256"}
+      ],
+      "name": "Sold",
+      "type": "event"
+    }
+  ]
+}

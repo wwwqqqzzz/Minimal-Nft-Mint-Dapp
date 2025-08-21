@@ -1,483 +1,420 @@
+/* global BigInt */
 import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 import contractJson from './MyNFT.json';
-import { shortenAddress, ipfsToHttp } from './utils/ipfs';
-import { getCurrentNetworkConfig, getNetworkByChainId, getExplorerUrl, GAS_LEVELS } from './utils/networks';
-import SkeletonCard from './components/SkeletonCard';
+import { ipfsToHttp } from './utils/ipfs';
+import { getNetworkByChainId, getExplorerUrl, GAS_LEVELS } from './utils/networks';
+import { MerkleTree } from 'merkletreejs';
 
 const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS || '';
 
-// 添加样式常量
-const COLORS = {
-  primary: '#2563eb',
-  success: '#10b981',
-  warning: '#f59e0b', 
-  danger: '#ef4444',
-  secondary: '#6b7280',
-  light: '#f8fafc',
-  white: '#ffffff'
-};
-
-// 新增：图片占位符（优先使用本地 public/og-image.svg）
+// 占位图片
 const PLACEHOLDER_IMAGE = '/og-image.svg';
 
 function App(){
   const [account, setAccount] = useState(null);
-  const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
-  const [totalSupply, setTotalSupply] = useState(0);
-  
-  // 新增状态
-  const [maxSupply, setMaxSupply] = useState(null);
-  const [walletInfo, setWalletInfo] = useState(null);
-  const [gasEstimate, setGasEstimate] = useState(null);
-  const [selectedGasLevel, setSelectedGasLevel] = useState('medium');
-  const [nftPreview, setNftPreview] = useState(null);
+  const [status, setStatus] = useState('Ready to mint!');
+  const [totalSupply, setTotalSupply] = useState(null);
   const [mintedNFTs, setMintedNFTs] = useState([]);
+  const [maxSupply, setMaxSupply] = useState(null);
+  const [selectedGasLevel, setSelectedGasLevel] = useState('medium');
+  const [gasEstimate, setGasEstimate] = useState(null);
+  const [gasLoading, setGasLoading] = useState(false);
   const [showNFTList, setShowNFTList] = useState(false);
-  const [nftLoading, setNftLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [nftsPerPage] = useState(12);
-  const [networkInfo, setNetworkInfo] = useState(null);
+  const [walletInfo, setWalletInfo] = useState(null);
+  const [merkleProofInput, setMerkleProofInput] = useState('');
+  // Merkle: 选配的自动 proof 生成支持
+  const [merkleRootOnChain, setMerkleRootOnChain] = useState(null);
+  const [allowlistAddrs, setAllowlistAddrs] = useState(null);
+  const [merkleAutoLoading, setMerkleAutoLoading] = useState(false);
+  const nftsPerPage = 12;
 
-  useEffect(() => {
-    checkIfWalletConnected();
-    checkNetwork();
-    loadNFTPreview();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      await checkNetwork();
-      if (account && CONTRACT_ADDRESS) {
-        await getWalletMintInfo();
-        await estimateGasCost();
-        await loadMintedNFTs();
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account, CONTRACT_ADDRESS]);
-
-  // 实时更新 Gas 估算（每 30 秒）
-  useEffect(() => {
-    if (account && CONTRACT_ADDRESS) {
-      const interval = setInterval(estimateGasCost, 30000);
-      return () => clearInterval(interval);
+  // 新增：白名单（Merkle）铸造函数（手动粘贴 proof）
+  async function allowlistMint() {
+    if (!window.ethereum) {
+      alert('请先安装 MetaMask');
+      return;
     }
-  }, [account, selectedGasLevel]);
+    if (!CONTRACT_ADDRESS) {
+      alert('请在 frontend 的 .env 中设置 REACT_APP_CONTRACT_ADDRESS');
+      return;
+    }
 
-  async function checkIfWalletConnected() {
-    if (window.ethereum) {
-      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-      if (accounts.length > 0) {
-        setAccount(accounts[0]);
-        await checkNetwork();
+    // 铸造限制检查
+    if (walletInfo && walletInfo.maxMintPerWallet && parseInt(walletInfo.remainingMints) <= 0) {
+      alert('❌ 您已达到最大铸造数量限制');
+      return;
+    }
+
+    // 解析用户输入的 Merkle Proof
+    let proof;
+    const trimmed = (merkleProofInput || '').trim();
+    if (!trimmed) {
+      alert('请粘贴 Merkle Proof');
+      return;
+    }
+    try {
+      // 优先尝试 JSON 数组
+      proof = JSON.parse(trimmed);
+      if (!Array.isArray(proof)) throw new Error('proof 必须是数组');
+    } catch (_) {
+      // 退化为逗号分隔字符串
+      proof = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    try {
+      setLoading(true);
+      setStatus('准备发送白名单铸造交易...');
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      // 使用最小 ABI 调用，避免前端 ABI 未同步导致的方法缺失
+      const allowlistAbi = ['function allowlistMint(bytes32[] proof)'];
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, allowlistAbi, signer);
+
+      const tx = await contract.allowlistMint(proof);
+      setStatus('等待交易确认... ' + tx.hash);
+      const receipt = await tx.wait();
+
+      if (receipt.status === 1) {
+        setStatus('白名单铸造成功！交易哈希: ' + tx.hash);
+        await getTotalSupply();
+        await getWalletMintInfo();
+        await loadMintedNFTs();
+        setShowNFTList(true);
+        const explorerUrl = getExplorerUrl(tx.hash);
+        alert(`白名单铸造成功！\n交易哈希: ${tx.hash}\n区块链浏览器: ${explorerUrl}`);
+      } else {
+        setStatus('交易失败');
+        alert('❌ 交易失败');
       }
+    } catch (err) {
+      console.error(err);
+      let msg = '❌ 白名单铸造失败: ' + (err?.shortMessage || err?.message || '未知错误');
+      setStatus(msg);
+      alert(msg);
+    } finally {
+      setLoading(false);
     }
   }
 
-  async function checkNetwork() {
-    if (!window.ethereum) return;
+  // 新增：自动生成 Merkle Proof 并铸造（需要 public/allowlist.json）
+  async function autoAllowlistMint() {
     try {
+      if (!window.ethereum) {
+        alert('请先安装 MetaMask');
+        return;
+      }
+      if (!CONTRACT_ADDRESS) {
+        alert('请在 frontend 的 .env 中设置 REACT_APP_CONTRACT_ADDRESS');
+        return;
+      }
+      if (!account) {
+        alert('请先连接钱包');
+        return;
+      }
+      if (!allowlistAddrs || allowlistAddrs.length === 0) {
+        alert('未检测到 allowlist.json，请将白名单地址数组放到 frontend/public/allowlist.json');
+        return;
+      }
+
+      // 铸造限制检查
+      if (walletInfo && walletInfo.maxMintPerWallet && parseInt(walletInfo.remainingMints) <= 0) {
+        alert('❌ 您已达到最大铸造数量限制');
+        return;
+      }
+
+      setMerkleAutoLoading(true);
+      setStatus('正在计算 Merkle Proof...');
+
+      // 1) 构建 Merkle Tree（叶子为 keccak256(abi.encodePacked(address))）
+      const leaves = allowlistAddrs.map(addr => ethers.keccak256(ethers.solidityPacked(['address'], [addr])));
+      const hashFn = (data) => ethers.keccak256(data);
+      const tree = new MerkleTree(leaves, hashFn, { sortPairs: true });
+
+      // 2) 计算当前账户的 leaf 与 proof
+      const leaf = ethers.keccak256(ethers.solidityPacked(['address'], [account]));
+      const proof = tree.getHexProof(leaf);
+      const rootHex = tree.getHexRoot();
+
+      // 3) 校验与链上 merkleRoot 一致性
+      if (merkleRootOnChain && rootHex && merkleRootOnChain !== '0x' && merkleRootOnChain !== '0x0') {
+        if (rootHex.toLowerCase() !== merkleRootOnChain.toLowerCase()) {
+          const cont = window.confirm(`本地计算的 Merkle Root 与链上不一致:\nLocal: ${rootHex}\nOn-chain: ${merkleRootOnChain}\n是否仍然尝试提交？`);
+          if (!cont) return;
+        }
+      }
+
+      // 4) 发送交易
+      setStatus('准备发送白名单铸造交易...');
       const provider = new ethers.BrowserProvider(window.ethereum);
-      const network = await provider.getNetwork();
-      const networkConfig = getNetworkByChainId(Number(network.chainId));
-      const currentConfig = getCurrentNetworkConfig();
-      
-      setNetworkInfo({
-        current: networkConfig,
-        expected: currentConfig,
-        isCorrect: networkConfig && networkConfig.chainId === currentConfig.chainId
-      });
-      
-      if (!networkConfig || networkConfig.chainId !== currentConfig.chainId) {
-        setStatus(`⚠️ 请切换到 ${currentConfig.name}`);
+      const signer = await provider.getSigner();
+      const allowlistAbi = ['function allowlistMint(bytes32[] proof)'];
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, allowlistAbi, signer);
+
+      const tx = await contract.allowlistMint(proof);
+      setStatus('等待交易确认... ' + tx.hash);
+      const receipt = await tx.wait();
+
+      if (receipt.status === 1) {
+        setStatus('白名单铸造成功！交易哈希: ' + tx.hash);
+        await getTotalSupply();
+        await getWalletMintInfo();
+        await loadMintedNFTs();
+        setShowNFTList(true);
+        const explorerUrl = getExplorerUrl(tx.hash);
+        alert(`白名单铸造成功！\n交易哈希: ${tx.hash}\n区块链浏览器: ${explorerUrl}`);
+      } else {
+        setStatus('交易失败');
+        alert('❌ 交易失败');
+      }
+    } catch (err) {
+      console.error(err);
+      let msg = '❌ 自动白名单铸造失败: ' + (err?.shortMessage || err?.message || '未知错误');
+      setStatus(msg);
+      alert(msg);
+    } finally {
+      setMerkleAutoLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function init() {
+    if(window.ethereum) {
+      await connect();
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+      if(accounts.length > 0) {
+        setAccount(accounts[0]);
+        await getTotalSupply();
+        await getMaxSupply();
+        await getWalletMintInfo();
+        await loadMintedNFTs();
+      }
+
+      // 读取链上 merkleRoot（可选）
+      try {
+        if (CONTRACT_ADDRESS) {
+          const provider = new ethers.BrowserProvider(window.ethereum);
+          const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
+          const root = await contract.merkleRoot();
+          setMerkleRootOnChain(root);
+        }
+      } catch (e) {
+        console.warn('读取 merkleRoot 失败（可忽略）：', e?.message || e);
+      }
+
+      // 尝试加载前端白名单地址（可选：frontend/public/allowlist.json）
+      try {
+        const res = await fetch('/allowlist.json');
+        if (res.ok) {
+          const arr = await res.json();
+          if (Array.isArray(arr)) setAllowlistAddrs(arr);
+        }
+      } catch (_) { /* 忽略 */ }
+    }
+  }
+
+  async function connect() {
+    try {
+      if (!window.ethereum) {
+        alert('请安装 MetaMask');
         return;
       }
       
-      // 如果在正确的网络上，获取总供应量
-      await getTotalSupply();
-    } catch (error) {
-      console.error('检查网络失败:', error);
-    }
-  }
-
-  async function switchNetwork() {
-    if (!window.ethereum) return;
-    const targetNetwork = getCurrentNetworkConfig();
-    
-    try {
-      // 尝试切换到目标网络
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: targetNetwork.chainIdHex }],
-      });
-      setStatus(`已切换到 ${targetNetwork.name}`);
-      await getTotalSupply();
-    } catch (switchError) {
-      // 如果网络不存在，添加网络
-      if (switchError.code === 4902) {
-        try {
-          await window.ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: targetNetwork.chainIdHex,
-              chainName: targetNetwork.name,
-              nativeCurrency: targetNetwork.nativeCurrency,
-              rpcUrls: targetNetwork.rpcUrls,
-              blockExplorerUrls: targetNetwork.blockExplorerUrls,
-            }],
-          });
-          setStatus(`已添加并切换到 ${targetNetwork.name}`);
-          await getTotalSupply();
-        } catch (addError) {
-          console.error('添加网络失败:', addError);
-          setStatus('添加网络失败: ' + addError.message);
-        }
-      } else {
-        console.error('切换网络失败:', switchError);
-        setStatus('切换网络失败: ' + switchError.message);
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      setAccount(accounts[0]);
+      
+      // 检查网络
+      const currentChainId = await window.ethereum.request({ method: 'eth_chainId' });
+      const currentNetwork = getNetworkByChainId(currentChainId);
+      
+      if (!currentNetwork) {
+        alert(`不支持的网络，请切换到支持的网络`);
+        return;
       }
+      
+      await getTotalSupply();
+      await getMaxSupply();
+      await getWalletMintInfo();
+      await loadMintedNFTs();
+      
+      setStatus(`已连接到 ${currentNetwork.name}`);
+    } catch (error) {
+      console.error('连接钱包失败:', error);
+      setStatus('连接钱包失败');
     }
   }
 
   async function getTotalSupply() {
-    if (!CONTRACT_ADDRESS || !window.ethereum) return;
     try {
+      if (!CONTRACT_ADDRESS || !window.ethereum) return;
       const provider = new ethers.BrowserProvider(window.ethereum);
       const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
       const supply = await contract.totalSupply();
       setTotalSupply(supply.toString());
-      
-      // 尝试获取最大供应量（如果合约有的话）
-      try {
-        const max = await contract.MAX_SUPPLY();
-        setMaxSupply(max.toString());
-      } catch {
-        // 如果没有 MAX_SUPPLY，设为 null（无限制）
-        setMaxSupply(null);
-      }
     } catch (error) {
-      console.error('Error getting total supply:', error);
+      console.error('获取总供应量失败:', error);
     }
   }
 
-  // 新增：获取钱包铸造信息
+  async function getMaxSupply() {
+    try {
+      if (!CONTRACT_ADDRESS || !window.ethereum) return;
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
+      
+      // 检查合约是否有 maxSupply 方法
+      const maxSupply = await contract.maxSupply();
+      setMaxSupply(maxSupply.toString());
+    } catch (error) {
+      // 如果没有 maxSupply 方法，设为 null
+      setMaxSupply(null);
+    }
+  }
+
   async function getWalletMintInfo() {
-    if (!CONTRACT_ADDRESS || !window.ethereum || !account) return;
     try {
+      if (!CONTRACT_ADDRESS || !window.ethereum || !account) return;
       const provider = new ethers.BrowserProvider(window.ethereum);
       const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
       
-      const info = await contract.getWalletMintInfo(account);
-      setWalletInfo({
-        mintedCount: info[0].toString(),
-        remainingMints: info[1].toString(),
-        isWhitelisted: info[2]
-      });
-    } catch (error) {
-      console.error('Error getting wallet info:', error);
-      setWalletInfo(null);
-    }
-  }
-
-  // 增强版 Gas 估算：多档位 + 实时更新
-  async function estimateGasCost(forceUpdate = false) {
-    if (!CONTRACT_ADDRESS || !window.ethereum || !account) return;
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
+      // 获取钱包已铸造数量
+      const mintCount = await contract.balanceOf(account);
       
-      const gasLimit = await contract.mint.estimateGas();
-      const feeData = await provider.getFeeData();
-      const baseGasPrice = feeData.gasPrice || feeData.maxFeePerGas;
-      
-      const gasLevels = {};
-      Object.entries(GAS_LEVELS).forEach(([level, config]) => {
-        // eslint-disable-next-line no-undef
-        const adjustedPrice = baseGasPrice * BigInt(Math.floor(config.multiplier * 100)) / BigInt(100);
-        const totalCost = gasLimit * adjustedPrice;
-        
-        gasLevels[level] = {
-          ...config,
-          gasPrice: ethers.formatUnits(adjustedPrice, 'gwei'),
-          totalCost: ethers.formatEther(totalCost),
-          rawGasPrice: adjustedPrice
-        };
-      });
-      
-      setGasEstimate({
-        gasLimit: gasLimit.toString(),
-        levels: gasLevels,
-        lastUpdate: new Date().toLocaleTimeString()
-      });
-    } catch (error) {
-      console.error('Error estimating gas:', error);
-      setGasEstimate(null);
-    }
-  }
-
-  // 修复：加载真实的NFT预览
-  async function loadNFTPreview() {
-    try {
-      if (!CONTRACT_ADDRESS || !window.ethereum) {
-        console.log('合约地址或钱包未准备好，使用默认预览');
-        setNftPreview({
-          name: "My NFT #0",
-          description: "A minimal example NFT - Token 0",
-          image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400"
-        });
-        return;
-      }
-      
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
-      
-      // 尝试获取第0个token的URI作为预览
+      // 尝试获取最大铸造限制
+      let maxMintPerWallet = null;
       try {
-        const tokenURI = await contract.tokenURI(0);
-        const httpUrl = ipfsToHttp(tokenURI);
-        
-        console.log('正在从以下URL加载预览metadata:', httpUrl);
-        const response = await fetch(httpUrl);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const metadata = await response.json();
-        
-        setNftPreview({
-          name: metadata.name || "My NFT #0",
-          description: metadata.description || "A minimal example NFT",
-          image: ipfsToHttp(metadata.image) || "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400"
-        });
-        
-        console.log('✅ 成功加载NFT预览:', metadata);
-        
-      } catch (tokenError) {
-        console.log('Token 0 不存在或metadata无法访问，使用默认预览:', tokenError.message);
-        
-        // 尝试获取当前合约的baseURI + "0"
-        try {
-          // 大多数NFT合约的tokenURI格式是baseURI + tokenId
-          // 我们构造第0个token的预期URL
-          const totalSupply = await contract.totalSupply();
-          
-          if (Number(totalSupply) > 0) {
-            // 如果有已铸造的NFT，用第一个作为预览
-            const firstTokenURI = await contract.tokenURI(0);
-            const httpUrl = ipfsToHttp(firstTokenURI);
-            const response = await fetch(httpUrl);
-            const metadata = await response.json();
-            
-            setNftPreview({
-              name: metadata.name || "My NFT #0",
-              description: metadata.description || "A minimal example NFT",
-              image: ipfsToHttp(metadata.image)
-            });
-          } else {
-            // 没有已铸造的NFT，使用默认预览
-            setNftPreview({
-              name: "My NFT #0",
-              description: "A minimal example NFT - Token 0", 
-              image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400"
-            });
-          }
-        } catch (fallbackError) {
-          console.log('无法获取合约信息，使用默认预览');
-          setNftPreview({
-            name: "My NFT #0",
-            description: "A minimal example NFT - Token 0",
-            image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400"
-          });
-        }
+        maxMintPerWallet = await contract.maxMintPerWallet();
+      } catch (e) {
+        // 如果没有限制，设为 null
       }
       
-    } catch (error) {
-      console.error('Error loading NFT preview:', error);
-      setNftPreview({
-        name: "My NFT #0",
-        description: "A minimal example NFT - Token 0",
-        image: "https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=400"
+      setWalletInfo({
+        mintedCount: mintCount.toString(),
+        maxMintPerWallet: maxMintPerWallet ? maxMintPerWallet.toString() : null,
+        remainingMints: maxMintPerWallet ? 
+          Math.max(0, parseInt(maxMintPerWallet.toString()) - parseInt(mintCount.toString())) : 
+          null
       });
+    } catch (error) {
+      console.error('获取钱包信息失败:', error);
     }
   }
 
-  // 增强版 NFT 加载：分页 + Skeleton
   async function loadMintedNFTs() {
-    if (!CONTRACT_ADDRESS || !window.ethereum || !account) return;
-    setNftLoading(true);
     try {
+      if (!CONTRACT_ADDRESS || !window.ethereum || !account) return;
+      
       const provider = new ethers.BrowserProvider(window.ethereum);
       const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
       
-      // 获取用户拥有的NFT数量
       const balance = await contract.balanceOf(account);
-      const balanceNum = Number(balance);
       const nfts = [];
       
-      if (balanceNum === 0) {
-        setMintedNFTs([]);
-        return;
-      }
-      
-      // 分批加载，避免一次性请求过多
-      const batchSize = 10;
-      for (let start = 0; start < Math.min(balanceNum, 100); start += batchSize) {
-        const batchPromises = [];
-        for (let i = start; i < Math.min(start + batchSize, balanceNum, 100); i++) {
-          batchPromises.push(loadSingleNFT(contract, i));
-        }
-        const batchResults = await Promise.allSettled(batchPromises);
-        batchResults.forEach((result) => {
-          if (result.status === 'fulfilled' && result.value) {
-            nfts.push(result.value);
-          }
+      for (let i = 0; i < parseInt(balance.toString()); i++) {
+        const tokenId = await contract.tokenOfOwnerByIndex(account, i);
+        const tokenURI = await contract.tokenURI(tokenId);
+        
+        const metadata = await fetchMetadata(tokenURI);
+        nfts.push({
+          tokenId: tokenId.toString(),
+          tokenURI,
+          metadata
         });
-        if (start + batchSize < balanceNum) {
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
-      }
-      
-      // 如果主路径（Enumerable）一个都没拿到，但 balance>0，使用兜底：totalSupply + ownerOf
-      if (nfts.length === 0 && balanceNum > 0) {
-        console.warn('Enumerable 枚举失败，触发兜底扫描 ownerOf');
-        const fallback = await fallbackLoadByOwnerOf(contract, balanceNum);
-        setMintedNFTs(fallback);
-        return;
       }
       
       setMintedNFTs(nfts);
     } catch (error) {
-      console.error('Error loading minted NFTs:', error);
-      try {
-        // 发生异常时也尝试兜底
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
-        const balance = await contract.balanceOf(account);
-        const balanceNum = Number(balance);
-        if (balanceNum > 0) {
-          const fallback = await fallbackLoadByOwnerOf(contract, balanceNum);
-          setMintedNFTs(fallback);
-          return;
-        }
-      } catch (e) {
-        console.error('Fallback ownerOf 也失败:', e);
-        setMintedNFTs([]);
-      }
-    } finally {
-      setNftLoading(false);
+      console.error('加载 NFT 失败:', error);
     }
   }
 
-  // 单个 NFT 加载逻辑（优先用 Enumerable）
-  async function loadSingleNFT(contract, index) {
+  async function fetchMetadata(uri) {
     try {
-      const tokenId = await contract.tokenOfOwnerByIndex(account, index);
-      return await resolveTokenData(contract, tokenId);
+      const httpUri = ipfsToHttp(uri);
+      const response = await fetch(httpUri);
+      if (!response.ok) throw new Error('Failed to fetch metadata');
+      return await response.json();
     } catch (error) {
-      console.error(`Error loading NFT ${index}:`, error);
-      return null;
-    }
-  }
-
-  // 兜底：按 totalSupply 遍历所有 tokenId，筛选 owner==account
-  async function fallbackLoadByOwnerOf(contract, targetCount) {
-    const results = [];
-    try {
-      const totalSupply = await contract.totalSupply();
-      const supplyNum = Math.min(Number(totalSupply), 1000); // 上限保护
-      const batchSize = 20;
-      for (let start = 0; start < supplyNum && results.length < targetCount; start += batchSize) {
-        const batchPromises = [];
-        for (let tokenId = start; tokenId < Math.min(start + batchSize, supplyNum); tokenId++) {
-          batchPromises.push((async () => {
-            try {
-              const owner = await contract.ownerOf(tokenId);
-              if (owner && owner.toLowerCase() === account.toLowerCase()) {
-                return await resolveTokenData(contract, tokenId);
-              }
-              return null;
-            } catch {
-              return null;
-            }
-          })());
-        }
-        const batchResults = await Promise.allSettled(batchPromises);
-        batchResults.forEach(r => {
-          if (r.status === 'fulfilled' && r.value) results.push(r.value);
-        });
-        if (start + batchSize < supplyNum && results.length < targetCount) {
-          await new Promise(res => setTimeout(res, 150));
-        }
-      }
-    } catch (e) {
-      console.error('fallbackLoadByOwnerOf error:', e);
-    }
-    return results;
-  }
-
-  // 辅助：解析 tokenURI 并拉取 metadata（带占位符）
-  async function resolveTokenData(contract, tokenId) {
-    try {
-      const uri = await contract.tokenURI(tokenId);
-      const httpUrl = ipfsToHttp(uri);
-      const meta = await fetchMetadata(httpUrl);
+      console.error('获取元数据失败:', error);
       return {
-        tokenId: tokenId.toString(),
-        name: meta.name || `My NFT #${tokenId}`,
-        description: meta.description || 'A minimal example NFT',
-        image: meta.image || PLACEHOLDER_IMAGE
-      };
-    } catch (e) {
-      console.warn(`读取 tokenURI(${tokenId}) 失败，使用占位信息`, e.message);
-      return {
-        tokenId: tokenId.toString(),
-        name: `My NFT #${tokenId}`,
-        description: 'A minimal example NFT',
+        name: 'Unknown NFT',
+        description: 'Metadata not available',
         image: PLACEHOLDER_IMAGE
       };
     }
   }
 
-  async function fetchMetadata(httpUrl) {
-    try {
-      const resp = await fetch(httpUrl);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const metadata = await resp.json();
-      return {
-        name: metadata?.name,
-        description: metadata?.description,
-        image: metadata?.image ? ipfsToHttp(metadata.image) : PLACEHOLDER_IMAGE
-      };
-    } catch (e) {
-      console.warn('获取 metadata 失败，使用占位符:', e.message);
-      return { name: undefined, description: undefined, image: PLACEHOLDER_IMAGE };
-    }
-  }
-
-  async function connect(){
-    if(!window.ethereum) return alert('请安装 MetaMask');
-    try {
-      const [addr] = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      setAccount(addr);
-      setStatus('钱包连接成功');
-    } catch (error) {
-      console.error('连接钱包失败:', error);
-      alert('连接钱包失败: ' + error.message);
-    }
-  }
-
-  // 增强版铸造：二次Gas估算 + 确认弹窗
-  async function mint(){
-    if (loading) return;
+  async function estimateGasCost(showAlert = false) {
+    if (!CONTRACT_ADDRESS || !window.ethereum) return;
     
-    // 白名单检查
-    if (walletInfo && !walletInfo.isWhitelisted) {
-      const whitelistEnabled = await checkWhitelistEnabled();
-      if (whitelistEnabled) {
-        alert('❌ 您不在白名单中，无法铸造 NFT');
+    setGasLoading(true);
+    try {
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, signer);
+
+      // 估算 Gas
+      const gasLimit = await contract.mint.estimateGas();
+      const feeData = await provider.getFeeData();
+      const gasPrice = feeData.gasPrice;
+
+      // 计算不同档位的费用
+      const levels = {};
+      Object.entries(GAS_LEVELS).forEach(([key, level]) => {
+        const adjustedGasPrice = gasPrice * BigInt(Math.floor(level.multiplier * 100)) / BigInt(100);
+        const totalCost = (gasLimit * adjustedGasPrice);
+        
+        levels[key] = {
+          ...level,
+          gasLimit: gasLimit.toString(),
+          gasPrice: ethers.formatUnits(adjustedGasPrice, 'gwei'),
+          rawGasPrice: adjustedGasPrice,
+          totalCost: ethers.formatEther(totalCost)
+        };
+      });
+
+      setGasEstimate({
+        gasLimit: gasLimit.toString(),
+        gasPrice: ethers.formatUnits(gasPrice, 'gwei'),
+        levels
+      });
+      
+      if (showAlert) {
+        const selectedLevel = levels[selectedGasLevel];
+        alert(`Gas 估算完成!\n档位: ${selectedLevel.name}\n预计费用: ${parseFloat(selectedLevel.totalCost).toFixed(6)} ETH`);
+      }
+      
+    } catch (error) {
+      console.error('Gas 估算失败:', error);
+      if (showAlert) {
+        alert('Gas 估算失败: ' + error.message);
+      }
+    } finally {
+      setGasLoading(false);
+    }
+  }
+
+  // 增强版 mint 函数
+  async function mint() {
+    // 如果启用旧版白名单，则进行简单映射检查；否则允许公售或使用 Merkle 通道
+    const whitelistEnabled = await checkWhitelistEnabled();
+    if (whitelistEnabled) {
+      try {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const contract = new ethers.Contract(CONTRACT_ADDRESS, contractJson.abi, provider);
+        const isWhitelisted = await contract.whitelist(account);
+        if (!isWhitelisted) {
+          alert('❌ 您不在白名单中，无法使用普通铸造。请使用“白名单铸造（Merkle）”入口。');
+          return;
+        }
+      } catch (error) {
+        alert('❌ 您不在白名单中，无法使用普通铸造。请使用“白名单铸造（Merkle）”入口。');
         return;
       }
     }
@@ -587,297 +524,377 @@ function App(){
   );
 
   return (
-    <div className="container">
+    <div className="container" style={{
+      minHeight: '100vh',
+      background: 'var(--bg-primary)',
+      color: 'var(--text-primary)',
+      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    }}>
       <style>
         {`
-          .container { max-width: 800px; margin: 0 auto; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-          .header { text-align: center; margin-bottom: 30px; }
-          .title { font-size: 2.5rem; font-weight: bold; color: ${COLORS.primary}; margin-bottom: 8px; }
-          .subtitle { color: ${COLORS.secondary}; font-size: 1.1rem; }
-          .card { background: ${COLORS.white}; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); padding: 24px; margin-bottom: 20px; }
-          .btn { background: ${COLORS.primary}; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
-          .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); }
-          .btn:disabled { background: ${COLORS.secondary}; cursor: not-allowed; transform: none; box-shadow: none; }
-          .btn-success { background: ${COLORS.success}; }
-          .btn-warning { background: ${COLORS.warning}; }
-          .btn-danger { background: ${COLORS.danger}; }
-          .progress-bar { background: ${COLORS.light}; border-radius: 8px; height: 8px; overflow: hidden; margin: 8px 0; }
-          .progress-fill { background: linear-gradient(90deg, ${COLORS.primary}, ${COLORS.success}); height: 100%; transition: width 0.3s; }
-          .network-status { padding: 12px; border-radius: 8px; margin-bottom: 16px; font-weight: 600; }
-          .network-correct { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
-          .network-wrong { background: #fef3c7; color: #d97706; border: 1px solid #fde68a; }
-          .gas-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
-          .gas-option { padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; text-align: center; transition: all 0.2s; }
-          .gas-option.selected { border-color: ${COLORS.primary}; background: #eff6ff; }
-          .gas-option:hover { border-color: ${COLORS.primary}; }
-          .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 16px 0; }
-          .info-item { padding: 16px; background: ${COLORS.light}; border-radius: 8px; text-align: center; }
-          .info-label { font-size: 0.9rem; color: ${COLORS.secondary}; margin-bottom: 4px; }
-          .info-value { font-size: 1.1rem; font-weight: 600; color: ${COLORS.primary}; }
-          .nft-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-top: 16px; }
-          .nft-card { border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; background: white; transition: transform 0.2s; }
-          .nft-card:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1); }
-          .nft-image { width: 100%; aspect-ratio: 1; object-fit: cover; }
-          .nft-info { padding: 12px; }
-          .pagination { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 20px; }
-          .page-btn { padding: 8px 12px; border: 1px solid #e5e7eb; background: white; border-radius: 6px; cursor: pointer; }
-          .page-btn.active { background: ${COLORS.primary}; color: white; border-color: ${COLORS.primary}; }
+          .info-label { 
+            font-size: 0.9rem; 
+            color: var(--text-secondary); 
+            margin-bottom: 4px; 
+          }
+          .info-value { 
+            font-size: 1.1rem; 
+            font-weight: 600; 
+            color: var(--primary); 
+          }
+          .nft-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); 
+            gap: 20px; 
+          }
+          .nft-card { 
+            border: 1px solid var(--card-border); 
+            border-radius: 12px; 
+            overflow: hidden; 
+            background: var(--card-bg); 
+            transition: transform 0.2s; 
+          }
+          .nft-card:hover { 
+            transform: translateY(-4px); 
+          }
+          .pagination { 
+            display: flex; 
+            justify-content: center; 
+            gap: 10px; 
+            margin: 20px 0; 
+          }
+          .page-btn { 
+            padding: 8px 12px; 
+            border: 1px solid var(--card-border); 
+            background: var(--card-bg); 
+            border-radius: 6px; 
+            cursor: pointer; 
+            color: var(--text-secondary); 
+          }
+          .page-btn.active { 
+            background: var(--primary); 
+            color: var(--text-primary); 
+            border-color: var(--primary); 
+          }
+          .page-btn:hover:not(.active) { 
+            background: var(--glass-bg); 
+          }
         `}
       </style>
 
-      {/* Header */}
-      <div className="header">
-        <div className="title">🎨 NFT Mint DApp</div>
-        <div className="subtitle">Mint your unique digital collectibles on blockchain</div>
-      </div>
+      {/* Header 已移至统一的 AppHeader 组件 */}
 
-      {/* Network Status */}
-      {networkInfo && (
-        <div className={`network-status ${networkInfo.isCorrect ? 'network-correct' : 'network-wrong'}`}>
-          {networkInfo.isCorrect ? (
-            <>
-              ✅ 已连接到 {networkInfo.current.name}
-              {networkInfo.current.isTestnet && ' (测试网络)'}
-            </>
-          ) : (
-            <>
-              ⚠️ 当前网络: {networkInfo.current?.name || '未知'}，请切换到 {networkInfo.expected.name}
-              <button 
-                className="btn btn-warning" 
-                onClick={switchNetwork}
-                style={{marginLeft: 12, padding: '6px 12px', fontSize: '0.9rem'}}
-              >
-                切换网络
-              </button>
-            </>
+      {/* Main Content */}
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 20px' }}>
+        {/* Collection Info */}
+        <div style={{
+          background: 'var(--card-bg)',
+          borderRadius: '20px',
+          padding: '30px',
+          marginBottom: '30px',
+          border: '1px solid var(--card-border)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div className="info-label">当前供应</div>
+              <div className="info-value">{totalSupply || '0'}</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div className="info-label">最大供应</div>
+              <div className="info-value">{maxSupply || '∞'}</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div className="info-label">铸造进度</div>
+              <div className="info-value">{getProgress().toFixed(1)}%</div>
+            </div>
+            {walletInfo && (
+              <>
+                <div style={{ textAlign: 'center' }}>
+                  <div className="info-label">我的NFT</div>
+                  <div className="info-value">{walletInfo.mintedCount}</div>
+                </div>
+                {walletInfo.maxMintPerWallet && (
+                  <div style={{ textAlign: 'center' }}>
+                    <div className="info-label">剩余铸造</div>
+                    <div className="info-value" style={{
+                      color: walletInfo.remainingMints > 0 ? 'var(--primary)' : 'var(--danger)'
+                    }}>
+                      {walletInfo.remainingMints}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Progress Bar */}
+          {maxSupply && (
+            <div style={{ marginTop: '20px' }}>
+              <div style={{
+                width: '100%',
+                height: '8px',
+                background: 'var(--glass-bg)',
+                borderRadius: '4px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  width: `${getProgress()}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, var(--primary), var(--secondary))',
+                  borderRadius: '4px',
+                  transition: 'width 0.3s ease'
+                }}></div>
+              </div>
+            </div>
           )}
         </div>
-      )}
 
-      {/* Wallet Connection */}
-      <div className="card">
-        <h2>💰 钱包连接</h2>
-        {!account ? (
-          <button className="btn" onClick={connect}>连接 MetaMask 钱包</button>
-        ) : (
-          <div>
-            <p>✅ 已连接: <strong>{shortenAddress(account)}</strong></p>
-            <div className="info-grid">
-              <div className="info-item">
-                <div className="info-label">总供应量</div>
-                <div className="info-value">{totalSupply}</div>
-              </div>
-              {maxSupply && (
-                <div className="info-item">
-                  <div className="info-label">最大供应量</div>
-                  <div className="info-value">{maxSupply}</div>
-                </div>
-              )}
-              {walletInfo && (
-                <>
-                  <div className="info-item">
-                    <div className="info-label">已铸造</div>
-                    <div className="info-value">{walletInfo.mintedCount}</div>
-                  </div>
-                  <div className="info-item">
-                    <div className="info-label">剩余铸造次数</div>
-                    <div className="info-value">{walletInfo.remainingMints}</div>
-                  </div>
-                  <div className="info-item">
-                    <div className="info-label">白名单状态</div>
-                    <div className="info-value">{walletInfo.isWhitelisted ? '✅ 是' : '❌ 否'}</div>
-                  </div>
-                </>
-              )}
+        {/* Mint Section */}
+        <div style={{
+          background: 'var(--card-bg)',
+          borderRadius: '20px',
+          padding: '30px',
+          marginBottom: '30px',
+          border: '1px solid var(--card-border)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <h2 style={{ marginBottom: '20px', color: 'var(--text-primary)' }}>🎨 铸造 NFT</h2>
+          
+          {/* Gas Settings */}
+          <div style={{ marginBottom: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>⛽ Gas 设置</h3>
+              <button
+                onClick={() => estimateGasCost(true)}
+                disabled={gasLoading}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--glass-bg)',
+                  border: '1px solid var(--card-border)',
+                  borderRadius: '8px',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer'
+                }}
+              >
+                {gasLoading ? '估算中...' : '重新估算'}
+              </button>
             </div>
             
-            {/* Progress Bar */}
-            {maxSupply && (
-              <div>
-                <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: COLORS.secondary}}>
-                  <span>铸造进度</span>
-                  <span>{getProgress().toFixed(1)}%</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
+              {Object.entries(GAS_LEVELS).map(([key, level]) => (
+                <div
+                  key={key}
+                  onClick={() => setSelectedGasLevel(key)}
+                  style={{
+                    padding: '15px',
+                    border: `2px solid ${selectedGasLevel === key ? 'var(--primary)' : 'var(--card-border)'}`,
+                    borderRadius: '12px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    background: selectedGasLevel === key ? 'var(--glass-bg)' : 'transparent'
+                  }}
+                >
+                  <div style={{ fontWeight: '600', color: 'var(--text-primary)' }}>{level.name}</div>
+                  <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: '5px 0' }}>
+                    {level.description}
+                  </div>
+                  {gasEstimate?.levels[key] && (
+                    <div style={{ fontSize: '0.85rem', color: 'var(--primary)' }}>
+                      预计: {parseFloat(gasEstimate.levels[key].totalCost).toFixed(6)} ETH
+                    </div>
+                  )}
                 </div>
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{width: `${getProgress()}%`}}></div>
-                </div>
-              </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Merkle Allowlist Mint Section */}
+          <div style={{ marginTop: '16px', padding: '16px', border: '1px solid var(--card-border)', borderRadius: '12px', background: 'var(--glass-bg)' }}>
+            <h3 style={{ margin: 0, marginBottom: 8 }}>白名单铸造（Merkle）</h3>
+            <p style={{ marginTop: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              如果您收到了白名单 Merkle 证明，请在下方粘贴 JSON 数组（例如：["0xabc...","0xdef..."]）或用逗号分隔的哈希。
+            </p>
+            <textarea
+              rows={4}
+              style={{ width: '100%', boxSizing: 'border-box', background: 'transparent', color: 'var(--text-primary)', border: '1px solid var(--card-border)', borderRadius: 8, padding: 8 }}
+              placeholder='在此粘贴 Merkle Proof（JSON 数组或逗号分隔）'
+              value={merkleProofInput}
+              onChange={e => setMerkleProofInput(e.target.value)}
+            />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                style={{ marginTop: 8, padding: '10px 16px', borderRadius: 8, border: '1px solid var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-primary)', cursor: loading || !account ? 'not-allowed' : 'pointer' }}
+                onClick={allowlistMint}
+                disabled={loading || !account}
+              >
+                {loading ? '处理中...' : '使用手动 proof 铸造'}
+              </button>
+              <button
+                style={{ marginTop: 8, padding: '10px 16px', borderRadius: 8, border: '1px solid var(--card-border)', background: 'var(--card-bg)', color: 'var(--text-primary)', cursor: merkleAutoLoading || !account ? 'not-allowed' : 'pointer' }}
+                onClick={autoAllowlistMint}
+                disabled={merkleAutoLoading || !account}
+                title={allowlistAddrs ? `已加载 ${allowlistAddrs.length} 个白名单地址` : '需提供 frontend/public/allowlist.json'}
+              >
+                {merkleAutoLoading ? '计算中...' : '自动生成 proof 并铸造'}
+              </button>
+            </div>
+          </div>
+
+          {/* Mint Button */}
+          <button
+            onClick={mint}
+            disabled={loading || !account}
+            style={{
+              width: '100%',
+              padding: '18px',
+              fontSize: '1.2rem',
+              fontWeight: '600',
+              borderRadius: '12px',
+              border: 'none',
+              background: loading ? 'var(--text-muted)' : 'linear-gradient(135deg, var(--primary), var(--secondary))',
+              color: 'white',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              boxShadow: loading ? 'none' : 'var(--glow-primary)',
+              transition: 'all 0.2s'
+            }}
+          >
+            {loading ? '铸造中...' : '铸造 NFT'}
+          </button>
+
+          {/* Status */}
+          <div style={{
+            marginTop: '20px',
+            padding: '15px',
+            background: 'var(--glass-bg)',
+            borderRadius: '12px',
+            border: '1px solid var(--card-border)',
+            textAlign: 'center',
+            color: 'var(--text-secondary)'
+          }}>
+            {status}
+          </div>
+        </div>
+
+        {/* My NFTs Section */}
+        {account && (
+          <div style={{
+            background: 'var(--card-bg)',
+            borderRadius: '20px',
+            padding: '30px',
+            border: '1px solid var(--card-border)',
+            boxShadow: 'var(--shadow-card)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h2 style={{ margin: 0, color: 'var(--text-primary)' }}>🖼️ 我的 NFT</h2>
+              <button
+                onClick={() => setShowNFTList(!showNFTList)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'var(--glass-bg)',
+                  border: '1px solid var(--card-border)',
+                  borderRadius: '8px',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer'
+                }}
+              >
+                {showNFTList ? '隐藏' : '显示'}
+              </button>
+            </div>
+
+            {showNFTList && (
+              <>
+                {mintedNFTs.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '40px',
+                    color: 'var(--text-secondary)'
+                  }}>
+                    还没有 NFT，快去铸造一个吧！
+                  </div>
+                ) : (
+                  <>
+                    <div className="nft-grid">
+                      {currentNFTs.map((nft, index) => (
+                        <div key={index} className="nft-card">
+                          <img
+                            src={ipfsToHttp(nft.metadata.image)}
+                            alt={nft.metadata.name}
+                            style={{
+                              width: '100%',
+                              height: '200px',
+                              objectFit: 'cover'
+                            }}
+                            onError={(e) => {
+                              e.target.src = PLACEHOLDER_IMAGE;
+                            }}
+                          />
+                          <div style={{ padding: '15px' }}>
+                            <h3 style={{ 
+                              margin: '0 0 8px 0', 
+                              fontSize: '1.1rem',
+                              color: 'var(--text-primary)'
+                            }}>
+                              {nft.metadata.name}
+                            </h3>
+                            <p style={{ 
+                              margin: '0 0 8px 0', 
+                              fontSize: '0.9rem', 
+                              color: 'var(--text-secondary)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {nft.metadata.description}
+                            </p>
+                            <div style={{ 
+                              fontSize: '0.8rem', 
+                              color: 'var(--primary)',
+                              fontWeight: '500'
+                            }}>
+                              Token ID: {nft.tokenId}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                      <div className="pagination">
+                        <button
+                          onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                          disabled={currentPage === 1}
+                          className="page-btn"
+                        >
+                          上一页
+                        </button>
+                        
+                        {[...Array(totalPages)].map((_, index) => (
+                          <button
+                            key={index}
+                            onClick={() => setCurrentPage(index + 1)}
+                            className={`page-btn ${currentPage === index + 1 ? 'active' : ''}`}
+                          >
+                            {index + 1}
+                          </button>
+                        ))}
+                        
+                        <button
+                          onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                          disabled={currentPage === totalPages}
+                          className="page-btn"
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
             )}
           </div>
         )}
-      </div>
-
-      {/* NFT Preview */}
-      {nftPreview && (
-        <div className="card">
-          <h2>🎨 NFT 预览</h2>
-          <div style={{display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, alignItems: 'start'}}>
-            <div style={{border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden'}}>
-              <img 
-                src={nftPreview.image} 
-                alt={nftPreview.name}
-                style={{width: '100%', aspectRatio: '1', objectFit: 'cover'}}
-                onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
-              />
-            </div>
-            <div>
-              <h3 style={{margin: '0 0 8px 0', color: COLORS.primary}}>{nftPreview.name}</h3>
-              <p style={{color: COLORS.secondary, lineHeight: 1.5}}>{nftPreview.description}</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Gas Settings */}
-      {account && gasEstimate && (
-        <div className="card">
-          <h2>⛽ Gas 设置</h2>
-          <p style={{color: COLORS.secondary, fontSize: '0.9rem', marginBottom: 12}}>
-            选择交易速度（更新时间: {gasEstimate.lastUpdate}）
-          </p>
-          <div className="gas-selector">
-            {Object.entries(gasEstimate.levels).map(([level, config]) => (
-              <div
-                key={level}
-                className={`gas-option ${selectedGasLevel === level ? 'selected' : ''}`}
-                onClick={() => setSelectedGasLevel(level)}
-              >
-                <div style={{fontWeight: 600, marginBottom: 4}}>{config.name}</div>
-                <div style={{fontSize: '0.8rem', color: COLORS.secondary, marginBottom: 8}}>{config.description}</div>
-                <div style={{fontSize: '0.9rem', fontWeight: 600}}>{parseFloat(config.totalCost).toFixed(6)} ETH</div>
-                <div style={{fontSize: '0.8rem', color: COLORS.secondary}}>{config.gasPrice} Gwei</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Mint Section */}
-      {account && networkInfo?.isCorrect && (
-        <div className="card">
-          <h2>🚀 铸造 NFT</h2>
-          <button 
-            className={`btn ${loading ? '' : 'btn-success'}`}
-            onClick={mint}
-            disabled={loading || !account || !networkInfo?.isCorrect}
-            style={{width: '100%', fontSize: '1.1rem', padding: '16px'}}
-          >
-            {loading ? '铸造中...' : '🎨 铸造我的 NFT'}
-          </button>
-          {status && (
-            <div style={{marginTop: 12, padding: 12, background: COLORS.light, borderRadius: 8, fontSize: '0.9rem'}}>
-              {status}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* My NFTs */}
-      {account && (
-        <div className="card">
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16}}>
-            <h2>🖼️ 我的 NFT 收藏</h2>
-            <button 
-              className="btn"
-              onClick={() => setShowNFTList(!showNFTList)}
-              style={{padding: '8px 16px', fontSize: '0.9rem'}}
-            >
-              {showNFTList ? '隐藏' : '显示'} ({mintedNFTs.length})
-            </button>
-          </div>
-          
-          {showNFTList && (
-            <>
-              {nftLoading && (
-                <div style={{textAlign: 'center', padding: 20}}>
-                  <div style={{color: COLORS.secondary}}>正在加载您的 NFT 收藏...</div>
-                  <div className="nft-grid" style={{marginTop: 16}}>
-                    {[...Array(6)].map((_, i) => (
-                      <SkeletonCard key={i} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {!nftLoading && mintedNFTs.length === 0 && (
-                <div style={{textAlign: 'center', padding: 40, color: COLORS.secondary}}>
-                  <div style={{fontSize: '3rem', marginBottom: 16}}>🎨</div>
-                  <div>您还没有铸造任何 NFT</div>
-                  <div style={{fontSize: '0.9rem', marginTop: 8}}>点击上方按钮开始铸造您的第一个 NFT！</div>
-                </div>
-              )}
-              
-              {!nftLoading && mintedNFTs.length > 0 && (
-                <>
-                  <div className="nft-grid">
-                    {currentNFTs.map((nft) => (
-                      <div key={nft.tokenId} className="nft-card">
-                        <img 
-                          src={nft.image || PLACEHOLDER_IMAGE}
-                          alt={nft.name}
-                          className="nft-image"
-                          onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
-                        />
-                        <div className="nft-info">
-                          <div style={{fontWeight: 600, marginBottom: 4}}>{nft.name}</div>
-                          <div style={{fontSize: '0.8rem', color: COLORS.secondary, marginBottom: 8}}>
-                            Token ID: {nft.tokenId}
-                          </div>
-                          <div style={{fontSize: '0.8rem', color: COLORS.secondary, lineHeight: 1.4}}>
-                            {nft.description}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  {/* Pagination */}
-                  {totalPages > 1 && (
-                    <div className="pagination">
-                      <button 
-                        className="page-btn"
-                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                        disabled={currentPage === 1}
-                      >
-                        ← 上一页
-                      </button>
-                      
-                      {[...Array(totalPages)].map((_, i) => (
-                        <button
-                          key={i + 1}
-                          className={`page-btn ${currentPage === i + 1 ? 'active' : ''}`}
-                          onClick={() => setCurrentPage(i + 1)}
-                        >
-                          {i + 1}
-                        </button>
-                      ))}
-                      
-                      <button 
-                        className="page-btn"
-                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                        disabled={currentPage === totalPages}
-                      >
-                        下一页 →
-                      </button>
-                      
-                      <div style={{marginLeft: 16, color: COLORS.secondary, fontSize: '0.9rem'}}>
-                        第 {currentPage} 页，共 {totalPages} 页 | 总计 {mintedNFTs.length} 个 NFT
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Footer */}
-      <div style={{textAlign: 'center', marginTop: 40, padding: 20, color: COLORS.secondary, fontSize: '0.9rem'}}>
-        <div>🎨 NFT Mint DApp</div>
-        <div style={{marginTop: 8}}>
-          合约地址: {CONTRACT_ADDRESS ? shortenAddress(CONTRACT_ADDRESS) : '未设置'}
-        </div>
       </div>
     </div>
   );

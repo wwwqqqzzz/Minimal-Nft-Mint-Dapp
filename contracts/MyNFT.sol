@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/interfaces/IERC2981.sol";
 import "@openzeppelin/contracts/utils/introspection/ERC165.sol";
+import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
 contract MyNFT is ERC721, ERC721Enumerable, Ownable, IERC2981 {
     using Counters for Counters.Counter;
@@ -18,9 +19,11 @@ contract MyNFT is ERC721, ERC721Enumerable, Ownable, IERC2981 {
     uint256 public maxMintPerWallet = 5;
     mapping(address => uint256) public walletMintCount;
     
-    // 白名单功能
-    bool public whitelistEnabled = false;
-    mapping(address => bool) public whitelist;
+    // 白名单功能（兼容旧版 + Merkle 版）
+    bool public whitelistEnabled = false; // 旧版开关
+    mapping(address => bool) public whitelist; // 旧版列表
+    bytes32 public merkleRoot; // 新版 Merkle 根
+    mapping(address => uint256) public allowlistMinted; // 记录地址基于 Merkle 的铸造数
     
     // 版税功能 (EIP-2981)
     address public royaltyReceiver;
@@ -31,6 +34,7 @@ contract MyNFT is ERC721, ERC721Enumerable, Ownable, IERC2981 {
     event WhitelistUpdated(address indexed wallet, bool status);
     event MaxMintPerWalletUpdated(uint256 newLimit);
     event RoyaltyUpdated(address receiver, uint96 feeNumerator);
+    event MerkleRootUpdated(bytes32 newRoot);
 
     constructor(
         string memory name_,
@@ -73,6 +77,31 @@ contract MyNFT is ERC721, ERC721Enumerable, Ownable, IERC2981 {
             _tokenIdCounter.increment();
             _safeMint(to, tokenId);
         }
+    }
+
+    /// @notice 设置 Merkle Root（新版白名单）
+    function setMerkleRoot(bytes32 root) public onlyOwner {
+        merkleRoot = root;
+        emit MerkleRootUpdated(root);
+    }
+
+    /// @notice Merkle 白名单铸造，需提供证明
+    function allowlistMint(bytes32[] calldata proof) external returns (uint256) {
+        require(merkleRoot != bytes32(0), "Merkle root not set");
+        // 叶子为 sender 地址的 keccak256 哈希
+        bytes32 leaf = keccak256(abi.encodePacked(msg.sender));
+        require(MerkleProof.verify(proof, merkleRoot, leaf), "Invalid proof");
+
+        // 检查每钱包铸造限制（与普通 mint 共享）
+        require(walletMintCount[msg.sender] < maxMintPerWallet, "Exceeded max mint per wallet");
+
+        uint256 tokenId = _tokenIdCounter.current();
+        _tokenIdCounter.increment();
+        walletMintCount[msg.sender]++;
+        allowlistMinted[msg.sender]++;
+
+        _safeMint(msg.sender, tokenId);
+        return tokenId;
     }
 
     // ======== 白名单管理 ========
