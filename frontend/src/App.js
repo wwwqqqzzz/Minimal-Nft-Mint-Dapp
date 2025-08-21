@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import contractJson from './MyNFT.json';
 import { ipfsToHttp } from './utils/ipfs';
 import { getNetworkByChainId, getExplorerUrl, GAS_LEVELS } from './utils/networks';
-import { MerkleTree } from 'merkletreejs';
+import { getProofAndRoot } from './utils/merkle';
 
 const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS || '';
 
@@ -130,13 +130,11 @@ function App(){
 
       // 1) 构建 Merkle Tree（叶子为 keccak256(abi.encodePacked(address))）
       const leaves = allowlistAddrs.map(addr => ethers.keccak256(ethers.solidityPacked(['address'], [addr])));
-      const hashFn = (data) => ethers.keccak256(data);
-      const tree = new MerkleTree(leaves, hashFn, { sortPairs: true });
 
       // 2) 计算当前账户的 leaf 与 proof
       const leaf = ethers.keccak256(ethers.solidityPacked(['address'], [account]));
-      const proof = tree.getHexProof(leaf);
-      const rootHex = tree.getHexRoot();
+      const { proof, root } = getProofAndRoot(leaves, leaf, true);
+      const rootHex = root;
 
       // 3) 校验与链上 merkleRoot 一致性
       if (merkleRootOnChain && rootHex && merkleRootOnChain !== '0x' && merkleRootOnChain !== '0x0') {
